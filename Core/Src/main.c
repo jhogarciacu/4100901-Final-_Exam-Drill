@@ -22,6 +22,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "keypad.h"
+#include "led_status.h"
+#include "ssd1306.h"
+#include "ssd1306_fonts.h"
+#include "ring_buffer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,22 +45,30 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+#define BUFFER_SIZE 10
+uint8_t buffer_memory[BUFFER_SIZE];
+ring_buffer_t ident_rb;
+uint8_t key_pressed;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_I2C1_Init(void);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 int _write(int file, char *ptr, int len)
 {
   // to using printf
@@ -66,6 +79,42 @@ int _write(int file, char *ptr, int len)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 
+	HAL_UART_Transmit(&huart2, "INTERRUPCION C\r\n",12,10);
+	uint8_t key_pressed = keypad_scan(GPIO_Pin);
+
+}
+
+
+void low_power_mode()
+{
+#define AWAKE_TIME (10 * 1000) // 10 segundos
+	static uint32_t sleep_tick = AWAKE_TIME;
+
+	if (sleep_tick > HAL_GetTick()) {
+		return;
+	}
+	printf("Sleeping\r\n");
+	sleep_tick = HAL_GetTick() + AWAKE_TIME;
+
+	RCC->AHB1SMENR  = 0x0;
+	RCC->AHB2SMENR  = 0x0;
+	RCC->AHB3SMENR  = 0x0;
+
+	RCC->APB1SMENR1 = 0x0;
+	RCC->APB1SMENR2 = 0x0;
+	RCC->APB2SMENR  = 0x0;
+
+	/*Suspend Tick increment to prevent wakeup by Systick interrupt.
+	Otherwise the Systick interrupt will wake up the device within 1ms (HAL time base)*/
+	HAL_SuspendTick();
+
+	/* Enter Sleep Mode , wake up is done once User push-button is pressed */
+	HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+
+	/* Resume Tick interrupt if disabled prior to SLEEP mode entry */
+	HAL_ResumeTick();
+
+	printf("Awake\r\n");
 }
 /* USER CODE END 0 */
 
@@ -99,15 +148,41 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
-  /* USER CODE END 2 */
+  ring_buffer_init(&ident_rb, buffer_memory, BUFFER_SIZE);
+  ssd1306_Init();
+  ssd1306_Fill(Black);
+  ssd1306_SetCursor(10, 20);
+  ssd1306_WriteString("RICARDO Y CAMILA!", Font_6x8, White);
+  ssd1306_UpdateScreen();
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   printf("Starting...\r\n");
   while (1)
   {
+		if (key_pressed != 0xFF){
+	  	ssd1306_WriteString(key_pressed, Font_6x8, White);
+			if(key_pressed = '*'){
+				ring_buffer_reset(&ident_rb);
+				}
+			if(key_pressed = '#'){
+				uint8_t val = validate_key(&ident_rb);
+				if(val = 1){
+					ssd1306_WriteString("correcto", Font_6x8, White);
+				}
+				else{
+					ssd1306_WriteString("incorrecto", Font_6x8, White);
+				}
+			}
+			else {
+				ring_buffer_write(&ident_rb, key_pressed);
+			}
+			key_pressed = 0xFF;
+		}
+
+//	  low_power_mode();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -163,6 +238,54 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x10909CEC;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
